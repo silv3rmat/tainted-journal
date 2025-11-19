@@ -1,0 +1,874 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tainted Grail - Game Map</title>
+    <link rel="stylesheet" href="{% static 'home/css/common.css' %}">
+    <link rel="stylesheet" href="{% static 'home/css/home.css' %}">
+    <style>
+        /* Ambient glow effect - page-specific override */
+        body {
+            background: linear-gradient(135deg, #0a0a0a 0%, #1a1a2e 50%, #0f0f1e 100%);
+            overflow: hidden;
+            position: relative;
+        }
+
+        body::before {
+            content: '';
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 800px;
+            height: 800px;
+            background: radial-gradient(circle, rgba(255, 153, 51, 0.15) 0%, transparent 70%);
+            pointer-events: none;
+            animation: flicker 4s ease-in-out infinite;
+        }
+
+        @keyframes flicker {
+            0%, 100% { opacity: 0.6; }
+            50% { opacity: 0.9; }
+        }
+    </style>
+</head>
+<body>
+    <!-- Welcome Modal -->
+    <div class="modal-overlay" id="welcomeModal">
+        <div class="modal-content">
+            <h2>Welcome, Traveler</h2>
+            <p>Before you embark on your journey through these tainted lands, tell us your name so we may chronicle your discoveries.</p>
+            <input type="text" 
+                   id="userName" 
+                   class="modal-input" 
+                   placeholder="Enter your name..."
+                   maxlength="50">
+            <button onclick="saveName()" class="modal-button">Begin Journey</button>
+        </div>
+    </div>
+    <div class="container">
+        <header>
+            <h1>TAINTED GRAIL</h1>
+        </header>
+
+        {% if messages %}
+        <div class="messages">
+            {% for message in messages %}
+            <div class="message {{ message.tags }}">
+                {{ message }}
+            </div>
+            {% endfor %}
+        </div>
+        {% endif %}
+
+        <div class="map-wrapper" id="mapWrapper">
+            <div class="map-container" id="mapContainer">
+                {% for location in locations %}
+                    {% if location.is_empty %}
+                        <a href="{% url 'home:location_detail' location.id %}" 
+                           class="card" 
+                           data-coord-x="{{ location.coord_x }}" 
+                           data-coord-y="{{ location.coord_y }}"
+                           data-location-id="{{ location.id }}"
+                           data-updated-at="{{ location.updated_at.isoformat }}"
+                           data-latest-note-at="">
+                            <div class="card-plus">+</div>
+                            <div class="card-label">Empty Slot</div>
+                        </a>
+                    {% else %}
+                        <a href="{% url 'home:location_detail' location.id %}" 
+                           class="card card-filled" 
+                           data-coord-x="{{ location.coord_x }}" 
+                           data-coord-y="{{ location.coord_y }}"
+                           data-location-id="{{ location.id }}"
+                           data-updated-at="{{ location.updated_at.isoformat }}"
+                           data-latest-note-at="{{ location.latest_note_at }}">
+                            {% if location.picture %}
+                                <div class="card-background" style="background-image: url('{{ location.picture.url }}');"></div>
+                            {% endif %}
+                            {% if location.number %}
+                                <div class="card-number">{{ location.number }}</div>
+                            {% endif %}
+                            {% if location.name %}
+                                <div class="card-name">{{ location.name }}</div>
+                            {% endif %}
+                        </a>
+                    {% endif %}
+                {% endfor %}
+            </div>
+        </div>
+
+        <button class="reset-btn" id="resetBtn">Reset View</button>
+
+        <div class="zoom-controls">
+            <button class="zoom-btn" id="zoomIn">+</button>
+            <div class="zoom-level" id="zoomLevel">100%</div>
+            <button class="zoom-btn" id="zoomOut">−</button>
+        </div>
+    </div>
+
+    <!-- Journal Sidebar -->
+    <div class="journal-sidebar" id="journalSidebar">
+        <div class="journal-toggle" onclick="toggleJournal()">Journal</div>
+        
+        <div class="journal-header">
+            <h2>Journal</h2>
+        </div>
+
+        <div class="journal-content">
+            {% for note in journal_notes %}
+            <div class="note-item">
+                <!-- Header: Author and Date -->
+                <div class="note-header">
+                    <span class="note-author">{{ note.author }} - {{ note.created_at|date:"M d, Y H:i" }}</span>
+                    
+                    <!-- Delete button -->
+                    <form method="post" action="{% url 'home:journal_note_action' %}" style="display: inline;">
+                        {% csrf_token %}
+                        <input type="hidden" name="delete_journal_note" value="1">
+                        <input type="hidden" name="note_id" value="{{ note.id }}">
+                        <button type="submit" 
+                                class="note-delete"
+                                onclick="return confirm('Delete this journal note?')">
+                            ✕
+                        </button>
+                    </form>
+                </div>
+                
+                <!-- Body: Checkbox and Text -->
+                <div class="note-body">
+                    <!-- Checkbox on the left -->
+                    <form method="post" action="{% url 'home:journal_note_action' %}" style="display: contents;">
+                        {% csrf_token %}
+                        <input type="hidden" name="toggle_journal_note" value="1">
+                        <input type="hidden" name="note_id" value="{{ note.id }}">
+                        <input type="checkbox" 
+                               class="note-checkbox" 
+                               {% if note.completed %}checked{% endif %}
+                               onchange="this.form.submit()">
+                    </form>
+                    
+                    <!-- Note text -->
+                    <div class="note-content">
+                        <div class="note-text {% if note.completed %}completed{% endif %}" 
+                             data-note-id="{{ note.id }}"
+                             data-note-type="journal"
+                             data-note-raw="{{ note.text|escapejs }}"
+                             ondblclick="enableJournalNoteEdit(this)">
+                            {{ note.get_linked_text|safe }}
+                        </div>
+                        <!-- Edit form (hidden by default) -->
+                        <form method="post" action="{% url 'home:journal_note_action' %}" class="note-edit-form" id="journal-edit-form-{{ note.id }}" style="display: none;">
+                            {% csrf_token %}
+                            <input type="hidden" name="edit_journal_note" value="1">
+                            <input type="hidden" name="note_id" value="{{ note.id }}">
+                            <textarea name="note_text" class="note-edit-input" rows="2"></textarea>
+                            <div class="note-edit-actions">
+                                <button type="submit" class="note-edit-btn note-edit-accept" title="Save changes">✓</button>
+                                <button type="button" class="note-edit-btn note-edit-discard" 
+                                        onclick="cancelJournalNoteEdit({{ note.id }})" title="Cancel">✕</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+            {% empty %}
+            <div style="text-align: center; padding: 2rem; color: rgba(212, 175, 55, 0.5);">
+                <p>No journal notes yet.</p>
+                <p style="font-size: 0.9rem;">Add your first note below.</p>
+            </div>
+            {% endfor %}
+            
+            <!-- Location Notes Section -->
+            {% if location_notes %}
+            <div style="border-top: 1px solid rgba(212, 175, 55, 0.3); margin-top: 1rem; padding-top: 1rem;">
+                <h3 style="font-size: 1rem; color: rgba(212, 175, 55, 0.8); margin-bottom: 0.5rem;">Location Notes</h3>
+                {% for note in location_notes %}
+                <div class="note-item location-note" data-location-id="{{ note.location.id }}" data-note-type="location">
+                    <!-- Header: Location info, Author and Date -->
+                    <div class="note-header">
+                        <div style="display: flex; flex-direction: column; gap: 0.2rem;">
+                            <span class="note-author">{{ note.author }} - {{ note.created_at|date:"M d, Y H:i" }}</span>
+                            <a href="/location/{{ note.location.id }}/" class="location-link" style="font-size: 0.9rem; color: #D4AF37;">
+                                {% if note.location.number and note.location.name %}
+                                    #{{ note.location.number }} - {{ note.location.name }}
+                                {% elif note.location.number %}
+                                    #{{ note.location.number }}
+                                {% elif note.location.name %}
+                                    {{ note.location.name }}
+                                {% else %}
+                                    Location {{ note.location.id }}
+                                {% endif %}
+                            </a>
+                        </div>
+                    </div>
+                    
+                    <!-- Body: Checkbox and Text -->
+                    <div class="note-body">
+                        <!-- Checkbox on the left -->
+                        <form method="post" action="{% url 'home:location_detail_action' note.location.id %}" style="display: contents;">
+                            {% csrf_token %}
+                            <input type="hidden" name="toggle_note" value="1">
+                            <input type="hidden" name="note_id" value="{{ note.id }}">
+                            <input type="checkbox" 
+                                   class="note-checkbox" 
+                                   {% if note.completed %}checked{% endif %}
+                                   onchange="this.form.submit()">
+                        </form>
+                        
+                        <!-- Note text -->
+                        <div class="note-content">
+                            <div class="note-text {% if note.completed %}completed{% endif %}" 
+                                 data-note-id="{{ note.id }}"
+                                 data-note-type="location"
+                                 data-note-raw="{{ note.text|escapejs }}">
+                                {{ note.get_linked_text|safe }}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+            {% endif %}
+        </div>
+
+        <!-- Add new journal note form -->
+        <div class="journal-input-section">
+            <form method="post" action="{% url 'home:journal_note_action' %}">
+                {% csrf_token %}
+                {{ journal_form.text }}
+                <button type="submit" name="add_journal_note" class="btn" style="margin-top: 0.5rem; width: 100%;">Add Journal Note</button>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        // Auto-dismiss messages after 3 seconds
+        document.addEventListener('DOMContentLoaded', function() {
+            const messages = document.querySelectorAll('.message');
+            messages.forEach(function(message) {
+                setTimeout(function() {
+                    message.classList.add('fade-out');
+                    setTimeout(function() {
+                        message.remove();
+                    }, 500); // Wait for fade-out animation to complete
+                }, 3000); // Show for 3 seconds
+            });
+        });
+
+        // Cookie functions
+        function setCookie(name, value, days) {
+            const d = new Date();
+            d.setTime(d.getTime() + (days * 24 * 60 * 60 * 1000));
+            const expires = "expires=" + d.toUTCString();
+            document.cookie = name + "=" + value + ";" + expires + ";path=/";
+        }
+
+        function getCookie(name) {
+            const nameEQ = name + "=";
+            const ca = document.cookie.split(';');
+            for(let i = 0; i < ca.length; i++) {
+                let c = ca[i];
+                while (c.charAt(0) == ' ') c = c.substring(1, c.length);
+                if (c.indexOf(nameEQ) == 0) return c.substring(nameEQ.length, c.length);
+            }
+            return null;
+        }
+
+        // Check for existing name on page load
+        window.addEventListener('DOMContentLoaded', function() {
+            const userName = getCookie('tainted_grail_user');
+            if (!userName) {
+                document.getElementById('welcomeModal').classList.add('active');
+            }
+        });
+
+        // Save name and close modal
+        function saveName() {
+            const input = document.getElementById('userName');
+            const name = input.value.trim();
+            
+            if (name) {
+                setCookie('tainted_grail_user', name, 365); // Store for 1 year
+                document.getElementById('welcomeModal').classList.remove('active');
+            } else {
+                input.focus();
+                input.style.borderColor = 'rgba(220, 20, 60, 0.6)';
+                setTimeout(() => {
+                    input.style.borderColor = 'rgba(212, 175, 55, 0.3)';
+                }, 1000);
+            }
+        }
+
+        // Allow Enter key to submit
+        document.getElementById('userName').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                saveName();
+            }
+        });
+
+        const mapWrapper = document.getElementById('mapWrapper');
+        const mapContainer = document.getElementById('mapContainer');
+        const zoomInBtn = document.getElementById('zoomIn');
+        const zoomOutBtn = document.getElementById('zoomOut');
+        const zoomLevelDisplay = document.getElementById('zoomLevel');
+        const resetBtn = document.getElementById('resetBtn');
+
+        let scale = 1;
+        let translateX = 0;
+        let translateY = 0;
+        let isDragging = false;
+        let startX, startY;
+        let lastX = 0;
+        let lastY = 0;
+
+        const MIN_SCALE = 0.3;
+        const MAX_SCALE = 2.5;
+        const SCALE_STEP = 0.2;
+        const WHEEL_SCALE_STEP = 0.05; // Slower zoom for mouse wheel
+        const CARD_WIDTH = 180;
+        const CARD_HEIGHT = 260;
+        const CARD_GAP = 20;
+
+        // Position cards based on their coordinates
+        function positionCards() {
+            const cards = document.querySelectorAll('.card');
+            cards.forEach(card => {
+                const coordX = parseInt(card.getAttribute('data-coord-x'));
+                const coordY = parseInt(card.getAttribute('data-coord-y'));
+                
+                // Convert grid coordinates to pixel positions
+                // Note: Y is inverted (negative Y goes up)
+                const left = coordX * (CARD_WIDTH + CARD_GAP);
+                const top = -coordY * (CARD_HEIGHT + CARD_GAP);
+                
+                card.style.left = `${left}px`;
+                card.style.top = `${top}px`;
+            });
+        }
+
+        function updateTransform() {
+            mapContainer.style.transform = `translate(calc(-50% + ${translateX}px), calc(-50% + ${translateY}px)) scale(${scale})`;
+            zoomLevelDisplay.textContent = `${Math.round(scale * 100)}%`;
+        }
+
+        function resetView() {
+            scale = 1;
+            translateX = 0;
+            translateY = 0;
+            lastX = 0;
+            lastY = 0;
+            updateTransform();
+        }
+
+        // Zoom in
+        zoomInBtn.addEventListener('click', () => {
+            if (scale < MAX_SCALE) {
+                scale = Math.min(scale + SCALE_STEP, MAX_SCALE);
+                updateTransform();
+            }
+        });
+
+        // Zoom out
+        zoomOutBtn.addEventListener('click', () => {
+            if (scale > MIN_SCALE) {
+                scale = Math.max(scale - SCALE_STEP, MIN_SCALE);
+                updateTransform();
+            }
+        });
+
+        // Reset button
+        resetBtn.addEventListener('click', resetView);
+
+        // Mouse wheel zoom (with slower speed)
+        mapWrapper.addEventListener('wheel', (e) => {
+            e.preventDefault();
+            const delta = e.deltaY > 0 ? -WHEEL_SCALE_STEP : WHEEL_SCALE_STEP;
+            const newScale = Math.max(MIN_SCALE, Math.min(MAX_SCALE, scale + delta));
+            
+            if (newScale !== scale) {
+                scale = newScale;
+                updateTransform();
+            }
+        });
+
+        // Dragging
+        mapWrapper.addEventListener('mousedown', (e) => {
+            isDragging = true;
+            startX = e.clientX - lastX;
+            startY = e.clientY - lastY;
+            mapWrapper.style.cursor = 'grabbing';
+            e.preventDefault();
+        });
+
+        mapWrapper.addEventListener('mousemove', (e) => {
+            if (!isDragging) return;
+            e.preventDefault();
+            translateX = e.clientX - startX;
+            translateY = e.clientY - startY;
+            lastX = translateX;
+            lastY = translateY;
+            updateTransform();
+        });
+
+        mapWrapper.addEventListener('mouseup', () => {
+            isDragging = false;
+            mapWrapper.style.cursor = 'grab';
+        });
+
+        mapWrapper.addEventListener('mouseleave', () => {
+            isDragging = false;
+            mapWrapper.style.cursor = 'grab';
+        });
+
+        // Touch support for mobile with pinch-to-zoom
+        let touchStartX, touchStartY;
+        let lastTouchX = 0;
+        let lastTouchY = 0;
+        let initialPinchDistance = 0;
+        let initialScale = 1;
+
+        function getTouchDistance(touch1, touch2) {
+            const dx = touch1.clientX - touch2.clientX;
+            const dy = touch1.clientY - touch2.clientY;
+            return Math.sqrt(dx * dx + dy * dy);
+        }
+
+        mapWrapper.addEventListener('touchstart', (e) => {
+            if (e.touches.length === 1) {
+                // Single finger - pan
+                touchStartX = e.touches[0].clientX;
+                touchStartY = e.touches[0].clientY;
+                lastTouchX = translateX;
+                lastTouchY = translateY;
+                isDragging = true;
+            } else if (e.touches.length === 2) {
+                // Two fingers - pinch zoom
+                isDragging = false;
+                initialPinchDistance = getTouchDistance(e.touches[0], e.touches[1]);
+                initialScale = scale;
+                e.preventDefault();
+            }
+        }, { passive: false });
+
+        mapWrapper.addEventListener('touchmove', (e) => {
+            if (e.touches.length === 1 && isDragging) {
+                // Single finger pan
+                e.preventDefault();
+                const deltaX = e.touches[0].clientX - touchStartX;
+                const deltaY = e.touches[0].clientY - touchStartY;
+                translateX = lastTouchX + deltaX;
+                translateY = lastTouchY + deltaY;
+                lastX = translateX;
+                lastY = translateY;
+                updateTransform();
+            } else if (e.touches.length === 2) {
+                // Two finger pinch zoom
+                e.preventDefault();
+                const currentDistance = getTouchDistance(e.touches[0], e.touches[1]);
+                const scaleChange = currentDistance / initialPinchDistance;
+                const newScale = Math.max(MIN_SCALE, Math.min(MAX_SCALE, initialScale * scaleChange));
+                
+                if (newScale !== scale) {
+                    scale = newScale;
+                    updateTransform();
+                }
+            }
+        }, { passive: false });
+
+        mapWrapper.addEventListener('touchend', (e) => {
+            if (e.touches.length === 0) {
+                isDragging = false;
+                initialPinchDistance = 0;
+            } else if (e.touches.length === 1) {
+                // Transition from pinch to pan
+                touchStartX = e.touches[0].clientX;
+                touchStartY = e.touches[0].clientY;
+                lastTouchX = translateX;
+                lastTouchY = translateY;
+                isDragging = true;
+            }
+        });
+
+        // Prevent card clicks when dragging
+        let clickStartTime;
+        let clickStartPos;
+        
+        mapWrapper.addEventListener('mousedown', (e) => {
+            clickStartTime = Date.now();
+            clickStartPos = { x: e.clientX, y: e.clientY };
+        });
+        
+        document.querySelectorAll('.card').forEach(card => {
+            card.addEventListener('click', (e) => {
+                const clickEndTime = Date.now();
+                const clickEndPos = { x: e.clientX, y: e.clientY };
+                const timeDiff = clickEndTime - clickStartTime;
+                const distance = Math.sqrt(
+                    Math.pow(clickEndPos.x - clickStartPos.x, 2) + 
+                    Math.pow(clickEndPos.y - clickStartPos.y, 2)
+                );
+                
+                // If it was a drag (moved more than 5px or took more than 200ms), prevent navigation
+                if (distance > 5 || timeDiff > 200) {
+                    e.preventDefault();
+                }
+            });
+        });
+
+        // Journal sidebar toggle
+        function toggleJournal() {
+            const sidebar = document.getElementById('journalSidebar');
+            sidebar.classList.toggle('open');
+        }
+
+        // Open journal if URL has journal=open parameter
+        if (window.location.search.includes('journal=open')) {
+            document.getElementById('journalSidebar').classList.add('open');
+            // Clean up URL without reloading
+            const url = new URL(window.location);
+            url.searchParams.delete('journal');
+            window.history.replaceState({}, '', url);
+        }
+
+        // Close journal when clicking on map
+        document.getElementById('mapWrapper').addEventListener('click', function(e) {
+            const sidebar = document.getElementById('journalSidebar');
+            if (sidebar.classList.contains('open')) {
+                sidebar.classList.remove('open');
+            }
+        });
+
+        // Journal note editing functions
+        function enableJournalNoteEdit(noteTextElement) {
+            const noteId = noteTextElement.getAttribute('data-note-id');
+            let rawText = noteTextElement.getAttribute('data-note-raw');
+            const editForm = document.getElementById('journal-edit-form-' + noteId);
+            const textarea = editForm.querySelector('textarea');
+            
+            // Unescape the text (reverse Django's escapejs)
+            rawText = rawText.replace(/\\n/g, '\n')
+                             .replace(/\\r/g, '\r')
+                             .replace(/\\'/g, "'")
+                             .replace(/\\"/g, '"')
+                             .replace(/\\\\/g, '\\');
+            
+            // Hide the display text, show the edit form
+            noteTextElement.style.display = 'none';
+            editForm.style.display = 'flex';
+            
+            // Set the textarea value and focus it
+            textarea.value = rawText;
+            textarea.focus();
+            
+            // Auto-resize textarea to fit content
+            textarea.style.height = 'auto';
+            textarea.style.height = textarea.scrollHeight + 'px';
+        }
+
+        function cancelJournalNoteEdit(noteId) {
+            const noteTextElement = document.querySelector('[data-note-id="' + noteId + '"]');
+            const editForm = document.getElementById('journal-edit-form-' + noteId);
+            
+            // Show the display text, hide the edit form
+            noteTextElement.style.display = 'inline';
+            editForm.style.display = 'none';
+        }
+
+        // Auto-resize journal note textarea as user types
+        document.addEventListener('input', function(e) {
+            if (e.target.classList.contains('note-edit-input')) {
+                e.target.style.height = 'auto';
+                e.target.style.height = e.target.scrollHeight + 'px';
+            }
+        });
+
+        // Allow Escape key to cancel journal note editing
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape' && e.target.classList.contains('note-edit-input')) {
+                const form = e.target.closest('.note-edit-form');
+                const noteId = form.querySelector('input[name="note_id"]').value;
+                cancelJournalNoteEdit(noteId);
+            }
+        });
+
+        // Initialize
+        positionCards();
+        updateTransform();
+
+        // Real-time updates
+        let lastKnownState = new Map();
+        let isFirstLoad = true;
+
+        // Initialize the known state
+        function initializeKnownState() {
+            document.querySelectorAll('.card').forEach(card => {
+                const id = card.getAttribute('data-location-id');
+                const updatedAt = card.getAttribute('data-updated-at');
+                const latestNoteAt = card.getAttribute('data-latest-note-at');
+                if (id) {
+                    lastKnownState.set(id, {
+                        updatedAt: updatedAt,
+                        latestNoteAt: latestNoteAt
+                    });
+                }
+            });
+            isFirstLoad = false;
+        }
+
+        // Poll for updates every 3 seconds
+        function pollForUpdates() {
+            fetch('/api/map-updates/')
+                .then(response => response.json())
+                .then(data => {
+                    if (isFirstLoad) {
+                        initializeKnownState();
+                        return;
+                    }
+
+                    let hasChanges = false;
+                    let hasNewLocations = false;
+                    let hasRemovedLocations = false;
+                    const currentLocationIds = new Set();
+                    const changeReasons = [];
+
+                    data.locations.forEach(location => {
+                        currentLocationIds.add(String(location.id));
+                        const lastKnown = lastKnownState.get(String(location.id));
+                        
+                        if (!lastKnown) {
+                            // New location added
+                            hasChanges = true;
+                            hasNewLocations = true;
+                            changeReasons.push(`New location: ${location.id}`);
+                        } else {
+                            // Check if location was updated (picture, name, number changed)
+                            if (location.updated_at !== lastKnown.updatedAt) {
+                                hasChanges = true;
+                                changeReasons.push(`Location updated: ${location.id}`);
+                            }
+                            // Check if a new note was added
+                            if (location.latest_note_at && location.latest_note_at !== lastKnown.latestNoteAt) {
+                                // Highlight the card with the new note
+                                highlightCard(location.id);
+                                // Update the known state for this location
+                                lastKnownState.set(String(location.id), {
+                                    updatedAt: location.updated_at,
+                                    latestNoteAt: location.latest_note_at
+                                });
+                                changeReasons.push(`New note on location: ${location.id}`);
+                            }
+                        }
+                    });
+
+                    // Check for removed locations
+                    lastKnownState.forEach((value, key) => {
+                        if (!currentLocationIds.has(key)) {
+                            hasChanges = true;
+                            hasRemovedLocations = true;
+                            changeReasons.push(`Location removed: ${key}`);
+                        }
+                    });
+
+                    // Only proceed if there are actual changes
+                    if (!hasChanges) {
+                        return; // No changes, skip update
+                    }
+
+                    console.log('🗺️ Map changes detected:', changeReasons);
+
+                    // Update state with new data
+                    lastKnownState.clear();
+                    data.locations.forEach(location => {
+                        lastKnownState.set(String(location.id), {
+                            updatedAt: location.updated_at,
+                            latestNoteAt: location.latest_note_at
+                        });
+                    });
+
+                    // Only reload if locations were added/removed (structural changes)
+                    // Don't reload for just note additions (those are highlighted)
+                    if (hasNewLocations || hasRemovedLocations) {
+                        console.log('🗺️ Structural changes detected, reloading map...');
+                        window.location.reload();
+                    } else {
+                        console.log('🗺️ State updated (highlights shown, no reload needed)');
+                    }
+                })
+                .catch(error => {
+                    console.error('Error polling for updates:', error);
+                });
+        }
+
+        function highlightCard(locationId) {
+            const card = document.querySelector(`[data-location-id="${locationId}"]`);
+            if (card) {
+                card.classList.add('highlight');
+                // Remove the highlight class after animation completes
+                setTimeout(() => {
+                    card.classList.remove('highlight');
+                }, 2000);
+            }
+        }
+
+        // Start polling after a short delay
+        setTimeout(() => {
+            initializeKnownState();
+            setInterval(pollForUpdates, 3000); // Poll every 3 seconds
+        }, 1000);
+
+        // Real-time journal updates
+        let lastJournalState = new Map();
+        let isFirstJournalLoad = true;
+
+        // Initialize the known journal state (both journal and location notes)
+        function initializeJournalState() {
+            const notes = document.querySelectorAll('.journal-content .note-item');
+            notes.forEach(noteItem => {
+                const checkbox = noteItem.querySelector('.note-checkbox');
+                const noteText = noteItem.querySelector('.note-text');
+                if (noteText) {
+                    const id = noteText.getAttribute('data-note-id');
+                    const noteType = noteText.getAttribute('data-note-type') || 'journal';
+                    const rawText = noteText.getAttribute('data-note-raw');
+                    const completed = checkbox ? checkbox.checked : false;
+                    if (id) {
+                        // Prefix with note type to avoid collisions between journal and location notes
+                        const prefixedId = noteType + '-' + id;
+                        lastJournalState.set(prefixedId, {
+                            text: rawText,
+                            completed: completed
+                        });
+                    }
+                }
+            });
+            isFirstJournalLoad = false;
+        }
+
+        // Poll for journal updates every 3 seconds (includes journal notes and location notes)
+        function pollJournalUpdates() {
+            fetch('/api/journal-updates/')
+                .then(response => response.json())
+                .then(data => {
+                    if (isFirstJournalLoad) {
+                        initializeJournalState();
+                        return;
+                    }
+
+                    let hasChanges = false;
+                    const currentNoteIds = new Set();
+                    const changeReasons = []; // Track what changed for debugging
+
+                    // Check journal notes
+                    if (data.journal_notes) {
+                        data.journal_notes.forEach(note => {
+                            const noteId = 'journal-' + String(note.id);
+                            currentNoteIds.add(noteId);
+                            const lastKnown = lastJournalState.get(noteId);
+                            
+                            if (!lastKnown) {
+                                hasChanges = true;
+                                changeReasons.push(`New journal note: ${noteId}`);
+                            } else {
+                                if (note.text !== lastKnown.text) {
+                                    hasChanges = true;
+                                    changeReasons.push(`Journal note text changed: ${noteId}`);
+                                }
+                                if (note.completed !== lastKnown.completed) {
+                                    hasChanges = true;
+                                    changeReasons.push(`Journal note completed changed: ${noteId}`);
+                                }
+                            }
+                        });
+                    }
+
+                    // Check location notes
+                    if (data.location_notes) {
+                        data.location_notes.forEach(note => {
+                            const noteId = 'location-' + String(note.id);
+                            currentNoteIds.add(noteId);
+                            const lastKnown = lastJournalState.get(noteId);
+                            
+                            if (!lastKnown) {
+                                hasChanges = true;
+                                changeReasons.push(`New location note: ${noteId}`);
+                            } else {
+                                if (note.text !== lastKnown.text) {
+                                    hasChanges = true;
+                                    changeReasons.push(`Location note text changed: ${noteId}`);
+                                }
+                                if (note.completed !== lastKnown.completed) {
+                                    hasChanges = true;
+                                    changeReasons.push(`Location note completed changed: ${noteId}`);
+                                }
+                            }
+                        });
+                    }
+
+                    // Check for deleted notes
+                    lastJournalState.forEach((value, key) => {
+                        if (!currentNoteIds.has(key)) {
+                            hasChanges = true;
+                            changeReasons.push(`Note deleted: ${key}`);
+                        }
+                    });
+
+                    // Only proceed if there are actual changes
+                    if (!hasChanges) {
+                        return; // No changes, skip update
+                    }
+                    
+                    console.log('📝 Journal changes detected:', changeReasons);
+                    
+                    // Update lastJournalState with new data
+                    lastJournalState.clear();
+                    
+                    // Store journal notes
+                    if (data.journal_notes) {
+                        data.journal_notes.forEach(note => {
+                            const noteId = 'journal-' + String(note.id);
+                            lastJournalState.set(noteId, {
+                                text: note.text,
+                                completed: note.completed
+                            });
+                        });
+                    }
+                    
+                    // Store location notes
+                    if (data.location_notes) {
+                        data.location_notes.forEach(note => {
+                            const noteId = 'location-' + String(note.id);
+                            lastJournalState.set(noteId, {
+                                text: note.text,
+                                completed: note.completed
+                            });
+                        });
+                    }
+                    
+                    // Only reload if journal is currently open (so user can see updates)
+                    const sidebar = document.getElementById('journalSidebar');
+                    const isOpen = sidebar && sidebar.classList.contains('open');
+                    
+                    if (isOpen) {
+                        console.log('📖 Journal is open, reloading to show changes...');
+                        window.location.href = window.location.pathname + '?journal=open';
+                    } else {
+                        console.log('📖 Journal is closed, state updated (no reload needed)');
+                    }
+                })
+                .catch(error => {
+                    console.error('Error polling for journal updates:', error);
+                });
+        }
+
+        // Start journal polling after a short delay
+        setTimeout(() => {
+            initializeJournalState();
+            setInterval(pollJournalUpdates, 3000); // Poll every 3 seconds
+        }, 1500);
+    </script>
+</body>
+</html>
+

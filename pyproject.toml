@@ -1,0 +1,13 @@
+[project]
+name = "tainted-grail"
+version = "0.1.0"
+description = "A dark Arthurian-themed Django web application"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "django>=4.2.7",
+]
+
+[dependency-groups]
+dev = []
+
