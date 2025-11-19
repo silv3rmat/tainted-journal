@@ -2,6 +2,29 @@
 
 A dark-themed web application for managing locations on a dynamic map with decision tree visualization, inspired by Arthurian legends.
 
+## Quick Start
+
+### Using Docker (Production)
+
+```bash
+docker-compose up --build
+```
+
+Access at **http://localhost** - use same wifi for multi-user or multi-device access
+
+### Gameplay
+
+#### Create a map of your locations - upload location cards as a photos via your mobile phone. 
+![map](map.png)
+
+#### Fill in your with the requirements, paths taken and choices not explored
+![location](location.png)
+
+Nodes represent the decisions to be made, they can have cost associated to them.
+Notes are multipurpose entity. Can be a generic findings related to the location, can also define the requirements needed to unlock path. 
+After defining Note, you can link it to the specific Edge. 
+Notes are visible in map view Journal and linked from there to a specific locations.
+
 ## Features
 
 - **Dynamic Map System** - Coordinate-based map that expands automatically as you add locations
@@ -23,16 +46,6 @@ A dark-themed web application for managing locations on a dynamic map with decis
 - React 18 (via Vite)
 - React Flow 11 (decision trees)
 - Vanilla JS (map view)
-
-## Quick Start
-
-### Using Docker (Production)
-
-```bash
-docker-compose up --build
-```
-
-Access at **http://localhost**
 
 ### Local Development
 
